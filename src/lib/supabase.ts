@@ -6,8 +6,8 @@ const STORAGE_KEY_KEY = 'ph_drive_supabase_anon_key';
 export function getStoredSupabaseConfig() {
   if (typeof window === 'undefined') return { url: '', key: '' };
   return {
-    url: localStorage.getItem(STORAGE_KEY_URL) || import.meta.env.VITE_SUPABASE_URL || '',
-    key: localStorage.getItem(STORAGE_KEY_KEY) || import.meta.env.VITE_SUPABASE_ANON_KEY || '',
+    url: import.meta.env.VITE_SUPABASE_URL || localStorage.getItem(STORAGE_KEY_URL) || '',
+    key: import.meta.env.VITE_SUPABASE_ANON_KEY || localStorage.getItem(STORAGE_KEY_KEY) || '',
   };
 }
 

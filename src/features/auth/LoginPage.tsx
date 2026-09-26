@@ -51,21 +51,27 @@ export function LoginPage({ onSetupNeeded }: LoginPageProps) {
     }
   };
 
+  const hasEnvSupabaseConfig =
+    Boolean(import.meta.env.VITE_SUPABASE_URL) &&
+    Boolean(import.meta.env.VITE_SUPABASE_ANON_KEY);
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center p-4 relative overflow-hidden">
       {/* Background ambient lighting */}
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
 
       {/* Top bar settings */}
-      <div className="absolute top-4 right-4 flex items-center gap-2">
-        <button
-          onClick={() => setShowConfigModal(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 rounded-lg text-xs font-medium transition"
-        >
-          <Settings className="w-3.5 h-3.5 text-blue-500" />
-          <span>Configurar Supabase</span>
-        </button>
-      </div>
+      {!hasEnvSupabaseConfig && (
+        <div className="absolute top-4 right-4 flex items-center gap-2">
+          <button
+            onClick={() => setShowConfigModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 rounded-lg text-xs font-medium transition"
+          >
+            <Settings className="w-3.5 h-3.5 text-blue-500" />
+            <span>Configurar Supabase</span>
+          </button>
+        </div>
+      )}
 
       <div className="w-full max-w-md relative z-10">
         {/* Brand Header */}
