@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Navigation, Calendar, Clock, Gauge, MapPin, FileText, CheckCircle, Ban, AlertCircle, Sparkles } from 'lucide-react';
 import { Trip, TripPoint } from '../../types';
 import { listTripPoints, addHomologationTestPoints, calculateTripComparison, calculateGpsDistance } from './tripPointsService';
+import { getEffectiveEndOdometer, getEffectiveTripDistance } from './tripUtils';
 import { TripMap } from '../../components/common/TripMap';
 import { useAuth } from '../auth/AuthContext';
 
@@ -72,11 +73,9 @@ export function TripDetailModal({ isOpen, trip, onClose, onTripUpdated }: TripDe
     return `${mins} min`;
   };
 
-  // Comparação de Distância Odômetro vs GPS
-  const odometerDistance = trip.distance_km;
-  const gpsDistance = trip.gps_distance_km ?? (points.length > 0 ? calculateGpsDistance(points) : null);
-  const comparison = calculateTripComparison(odometerDistance, gpsDistance);
-
+  const { distance: effectiveDistance, source: distanceSource } = getEffectiveTripDistance(trip);
+  const { odometer: effectiveEndOdometer, source: odometerSource } = getEffectiveEndOdometer(trip);
+  
   // Verificar pontos com baixa precisão (> 100m)
   const lowAccuracyCount = points.filter(p => p.accuracy_meters !== null && p.accuracy_meters > 100).length;
 
@@ -159,23 +158,18 @@ export function TripDetailModal({ isOpen, trip, onClose, onTripUpdated }: TripDe
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl">
               <span className="text-slate-500 block mb-1">Odômetro (Referência)</span>
-              <span className="text-lg font-bold text-white">
-                {odometerDistance !== null && odometerDistance !== undefined ? `${odometerDistance} km` : '—'}
-              </span>
-              <span className="text-[10px] text-slate-400 block mt-0.5">Início: {trip.start_odometer_km ?? '—'} | Fim: {trip.end_odometer_km ?? '—'}</span>
+              <div className="text-[11px] text-slate-300 space-y-1">
+                <div>Início: <strong className="text-white">{trip.start_odometer_km?.toLocaleString('pt-BR')} km</strong></div>
+                <div>Fim: <strong className="text-white">{effectiveEndOdometer !== null ? effectiveEndOdometer.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'} km</strong></div>
+                <div className="text-slate-400">Fonte do fim: {odometerSource === 'RECORDED' ? 'Registrado' : 'Calculado pelo GPS'}</div>
+              </div>
             </div>
             <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl">
-              <span className="text-slate-500 block mb-1">GPS (Calculado Haversine)</span>
+              <span className="text-slate-500 block mb-1">Distância (Efetiva)</span>
               <span className="text-lg font-bold text-emerald-400">
-                {gpsDistance !== null && gpsDistance !== undefined ? `${gpsDistance} km` : '—'}
+                {effectiveDistance !== null ? `${effectiveDistance.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} km` : '—'}
               </span>
-              {comparison.hasComparison ? (
-                <span className="text-[10px] text-slate-400 block mt-0.5">
-                  Diferença: {comparison.differenceKm} km ({comparison.differencePercent}%)
-                </span>
-              ) : (
-                <span className="text-[10px] text-slate-500 block mt-0.5">Comparação indisponível</span>
-              )}
+              <span className="text-[10px] text-slate-400 block mt-0.5">Fonte: {distanceSource}</span>
             </div>
           </div>
 

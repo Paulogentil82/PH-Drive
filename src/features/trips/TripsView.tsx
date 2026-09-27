@@ -362,6 +362,7 @@ export function TripsView() {
       <StartTripModal
         isOpen={isStartModalOpen}
         vehicles={vehicles}
+        trips={trips}
         onClose={() => setIsStartModalOpen(false)}
         onStartTrip={handleStartTrip}
       />

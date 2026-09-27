@@ -1,39 +1,58 @@
 import React, { useState, useEffect } from 'react';
 import { X, Navigation, Car, ShieldAlert } from 'lucide-react';
-import { Vehicle } from '../../types';
+import { Trip, Vehicle } from '../../types';
+import { getEffectiveEndOdometer } from './tripUtils';
 import { startTripSchema } from './tripValidation';
 
 interface StartTripModalProps {
   isOpen: boolean;
   vehicles: Vehicle[];
+  trips: Trip[];
   onClose: () => void;
   onStartTrip: (vehicleId: string, startOdometer: number, originLabel?: string, notes?: string) => Promise<void>;
 }
 
-export function StartTripModal({ isOpen, vehicles, onClose, onStartTrip }: StartTripModalProps) {
+export function StartTripModal({ isOpen, vehicles, trips, onClose, onStartTrip }: StartTripModalProps) {
   const activeVehicles = vehicles.filter(v => v.active);
   const [vehicleId, setVehicleId] = useState<string>(activeVehicles[0]?.id || '');
-  const [startOdometer, setStartOdometer] = useState<number>(activeVehicles[0]?.odometer_km || 0);
+  const [startOdometer, setStartOdometer] = useState<number>(0);
   const [originLabel, setOriginLabel] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const getSuggestedOdometer = (id: string) => {
+    const selected = vehicles.find(v => v.id === id);
+    if (!selected) return 0;
+    
+    const vehicleOdometer = selected.odometer_km;
+    
+    const lastCompletedTrip = trips
+      .filter(t => t.vehicle_id === id && t.status === 'COMPLETED')
+      .sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime())[0];
+      
+    let lastTripOdometer: number | null = null;
+    if (lastCompletedTrip) {
+        const { odometer } = getEffectiveEndOdometer(lastCompletedTrip);
+        lastTripOdometer = odometer;
+    }
+    
+    return Math.max(vehicleOdometer, lastTripOdometer || 0);
+  };
+
   useEffect(() => {
     if (activeVehicles.length > 0 && !vehicleId) {
-      setVehicleId(activeVehicles[0].id);
-      setStartOdometer(activeVehicles[0].odometer_km);
+      const initialId = activeVehicles[0].id;
+      setVehicleId(initialId);
+      setStartOdometer(getSuggestedOdometer(initialId));
     }
-  }, [vehicles]);
+  }, [vehicles, trips]);
 
   if (!isOpen) return null;
 
   const handleVehicleChange = (id: string) => {
     setVehicleId(id);
-    const selected = vehicles.find(v => v.id === id);
-    if (selected) {
-      setStartOdometer(selected.odometer_km);
-    }
+    setStartOdometer(getSuggestedOdometer(id));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
