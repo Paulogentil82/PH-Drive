@@ -96,6 +96,8 @@ Antes de criar migration:
 
 Não tratar alteração manual de SQL histórico como migration aplicada.
 
+Enquanto o histórico antigo não estiver totalmente reconciliado, não usar migrations históricas do repositório para reconstrução automática do banco sem validação prévia contra o schema real.
+
 ## Testes
 Antes de declarar uma alteração concluída:
 - executar testes diretamente relacionados, quando disponíveis;
