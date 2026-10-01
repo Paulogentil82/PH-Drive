@@ -194,3 +194,4 @@ Esta seção deve permanecer atualizada. Quando um achado for corrigido e valida
 - validação heading_degrees diverge entre Zod e PostgreSQL;
 - fluxo de múltiplos veículos está incompleto;
 - testes/build/banco real ainda precisam ser validados.
+- CONFIRMADO — Conforme validação realizada no banco Supabase real, os privilégios excessivos de authenticated em public.fuel_entries, public.maintenance_entries, public.vehicle_documents, public.vehicle_expenses e public.vehicle_tires foram corrigidos e validados no banco real em 01/10/2026: somente CRUD permaneceu (SELECT, INSERT, UPDATE e DELETE = true); TRUNCATE, REFERENCES e TRIGGER = false. A aplicação foi manual via SQL Editor e NÃO está registrada no histórico supabase_migrations.
