@@ -25,15 +25,11 @@ export const maintenanceEntriesService = {
 
     if (error) throw error;
 
-    // Update vehicle odometer if needed
-    await supabase
-        .from('vehicles')
-        .update({ odometer_km: entry.odometer_km })
-        .eq('id', entry.vehicle_id)
-        .gt('odometer_km', entry.odometer_km); // Only update if new odometer is higher (Wait, logic in requirement says NUNCA reduzir. So if new is higher, update.)
-    // Actually the requirement is: "se maintenance.odometer_km > vehicle.odometer_km: atualizar vehicle.odometer_km."
-    // So:
-    await supabase.rpc('update_vehicle_odometer', { v_id: entry.vehicle_id, new_km: entry.odometer_km });
+    const { error: odometerError } = await supabase.rpc('update_vehicle_odometer', {
+      v_id: entry.vehicle_id,
+      new_km: entry.odometer_km,
+    });
+    if (odometerError) throw odometerError;
 
     return data as MaintenanceEntry;
   },

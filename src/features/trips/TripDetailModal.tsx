@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { X, Navigation, Calendar, Clock, Gauge, MapPin, FileText, CheckCircle, Ban, AlertCircle, Sparkles } from 'lucide-react';
+import { X, Navigation, Calendar, Clock, Gauge, MapPin, FileText, CheckCircle, Ban, AlertCircle } from 'lucide-react';
 import { Trip, TripPoint } from '../../types';
-import { listTripPoints, addHomologationTestPoints, calculateTripComparison, calculateGpsDistance } from './tripPointsService';
+import { listTripPoints, calculateTripComparison, calculateGpsDistance } from './tripPointsService';
 import { getEffectiveEndOdometer, getEffectiveTripDistance } from './tripUtils';
 import { TripMap } from '../../components/common/TripMap';
-import { useAuth } from '../auth/AuthContext';
 
 interface TripDetailModalProps {
   isOpen: boolean;
@@ -13,11 +12,9 @@ interface TripDetailModalProps {
   onTripUpdated?: () => void;
 }
 
-export function TripDetailModal({ isOpen, trip, onClose, onTripUpdated }: TripDetailModalProps) {
-  const { user } = useAuth();
+export function TripDetailModal({ isOpen, trip, onClose }: TripDetailModalProps) {
   const [points, setPoints] = useState<TripPoint[]>([]);
   const [loadingPoints, setLoadingPoints] = useState(false);
-  const [addingTest, setAddingTest] = useState(false);
 
   useEffect(() => {
     if (isOpen && trip) {
@@ -36,20 +33,6 @@ export function TripDetailModal({ isOpen, trip, onClose, onTripUpdated }: TripDe
       console.error('Error loading trip points:', err);
     } finally {
       setLoadingPoints(false);
-    }
-  };
-
-  const handleAddHomologationPoints = async () => {
-    if (!trip || !user) return;
-    try {
-      setAddingTest(true);
-      await addHomologationTestPoints(trip.id, user.id);
-      await fetchPoints(trip.id);
-      if (onTripUpdated) onTripUpdated();
-    } catch (err: any) {
-      alert('Erro ao gerar pontos de teste: ' + err.message);
-    } finally {
-      setAddingTest(false);
     }
   };
 
@@ -101,7 +84,7 @@ export function TripDetailModal({ isOpen, trip, onClose, onTripUpdated }: TripDe
         </div>
 
         <div className="space-y-6 text-xs">
-          {/* Status e Homologation Dev Helper (Se 0 pontos) */}
+          {/* Status */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3 bg-slate-950 border border-slate-800 rounded-xl">
             <div className="flex items-center gap-3">
               <span className="text-slate-400">Status</span>
@@ -114,18 +97,6 @@ export function TripDetailModal({ isOpen, trip, onClose, onTripUpdated }: TripDe
               </span>
             </div>
 
-            {/* Botão de Homologação / Teste em Dev */}
-            {points.length === 0 && trip.status === 'COMPLETED' && (
-              <button
-                onClick={handleAddHomologationPoints}
-                disabled={addingTest}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 rounded-xl transition font-medium"
-                title="Inserir pontos de teste para homologação do mapa e GPS"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-                <span>{addingTest ? 'Gerando...' : 'Gerar Pontos de Teste (Dev)'}</span>
-              </button>
-            )}
           </div>
 
           {/* MAPA DO TRAJETO */}

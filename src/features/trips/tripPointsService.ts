@@ -8,7 +8,7 @@ export const tripPointSchema = z.object({
   longitude: z.number().min(-180).max(180),
   accuracy_meters: z.number().min(0).nullable().optional(),
   speed_kmh: z.number().min(0).nullable().optional(),
-  heading_degrees: z.number().min(0).max(360).nullable().optional(),
+  heading_degrees: z.number().min(0).lt(360).nullable().optional(),
   altitude_meters: z.number().nullable().optional(),
   captured_at: z.string().min(1),
   sequence_number: z.number().int().min(0),
@@ -48,14 +48,27 @@ export function calculateGpsDistance(points: Array<{ latitude: number; longitude
 }
 
 export async function listTripPoints(tripId: string): Promise<TripPoint[]> {
-  const { data, error } = await supabase
-    .from('trip_points')
-    .select('*')
-    .eq('trip_id', tripId)
-    .order('sequence_number', { ascending: true });
+  const pageSize = 500;
+  const points: TripPoint[] = [];
+  let lastSequence = -1;
 
-  if (error) throw error;
-  return data || [];
+  // A sequência é única por viagem; o cursor evita sobreposição entre páginas.
+  // Não encerrar em página parcial: o backend pode impor limite menor que pageSize.
+  while (true) {
+    const { data, error } = await supabase
+      .from('trip_points')
+      .select('*')
+      .eq('trip_id', tripId)
+      .gt('sequence_number', lastSequence)
+      .order('sequence_number', { ascending: true })
+      .limit(pageSize);
+
+    if (error) throw error;
+    if (!data?.length) return points;
+
+    points.push(...data);
+    lastSequence = data[data.length - 1].sequence_number;
+  }
 }
 
 export async function addTripPoint(pointData: {
@@ -94,6 +107,10 @@ export async function addTripPoint(pointData: {
  * Gera pontos de homologação para teste manual em desenvolvimento (-23.5505, -46.6333 ex: São Paulo)
  */
 export async function addHomologationTestPoints(tripId: string, userId: string): Promise<number> {
+  if (!import.meta.env.DEV) {
+    throw new Error('Pontos fictícios são permitidos somente em desenvolvimento.');
+  }
+
   // Coordenadas simuladas em linha reta (ex: Av. Paulista / Centro SP)
   const baseLat = -23.5505;
   const baseLon = -46.6333;
