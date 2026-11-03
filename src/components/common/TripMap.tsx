@@ -161,7 +161,7 @@ export function TripMap({ points = [], height = '350px', className = '' }: TripM
         <div className="p-3 bg-slate-900 rounded-xl text-slate-500 mb-2 border border-slate-800">
           <Navigation className="w-6 h-6" />
         </div>
-        <p className="text-sm font-medium text-slate-300">Trajeto GPS ainda não disponível.</p>
+        <p className="text-sm font-medium text-slate-300">Nenhum ponto GPS registrado</p>
         <p className="text-xs text-slate-500 mt-1">Nenhum ponto geográfico foi registrado para esta viagem.</p>
       </div>
     );

@@ -3,6 +3,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProfileView } from '../ProfileView';
 
+vi.mock('../../../components/common/BackendHealthIndicator', () => ({ BackendHealthIndicator: () => null }));
+
 const mocks = vi.hoisted(() => ({
   user: { id: 'user-a', email: 'test@example.invalid' },
   preferences: { default_vehicle_id: null, distance_unit: 'KM', currency_code: 'BRL', date_format: 'DD/MM/YYYY', alert_upcoming_enabled: true, alert_urgent_enabled: true, alert_overdue_enabled: true, theme_preference: 'SYSTEM' },

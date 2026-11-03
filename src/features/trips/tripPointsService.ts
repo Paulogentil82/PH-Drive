@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { BackendReadError, reportBackendHealth, runBackendRead } from '../../lib/backendDiagnostics';
 import { supabase } from '../../lib/supabase';
 import { TripPoint, TripPointSource } from '../../types';
 
@@ -55,16 +56,18 @@ export async function listTripPoints(tripId: string): Promise<TripPoint[]> {
   // A sequência é única por viagem; o cursor evita sobreposição entre páginas.
   // Não encerrar em página parcial: o backend pode impor limite menor que pageSize.
   while (true) {
-    const { data, error } = await supabase
+    const data = await runBackendRead<TripPoint[] | null>('trip_points', signal => supabase
       .from('trip_points')
       .select('*')
       .eq('trip_id', tripId)
       .gt('sequence_number', lastSequence)
       .order('sequence_number', { ascending: true })
-      .limit(pageSize);
-
-    if (error) throw error;
-    if (!data?.length) return points;
+      .limit(pageSize).abortSignal(signal));
+    if (!Array.isArray(data)) {
+      reportBackendHealth({ kind: 'UNKNOWN' }, false, 'trip_points');
+      throw new BackendReadError({ kind: 'UNKNOWN' });
+    }
+    if (!data.length) return points;
 
     points.push(...data);
     lastSequence = data[data.length - 1].sequence_number;

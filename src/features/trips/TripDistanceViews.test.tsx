@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({ user: { id: 'user-a' }, vehicles: [] as any[],
 vi.mock('../auth/AuthContext', () => ({ useAuth: () => ({ user: mocks.user }) }));
 vi.mock('../../lib/supabase', () => ({ supabase: { from: (table: string) => {
   const query = {
-    select: () => query, eq: () => query, order: () => query,
+    abortSignal: () => query, select: () => query, eq: () => query, order: () => query,
     then: (resolve: any, reject: any) => Promise.resolve({ data: table === 'vehicles' ? mocks.vehicles : mocks.trips, error: null }).then(resolve, reject),
   };
   return query;

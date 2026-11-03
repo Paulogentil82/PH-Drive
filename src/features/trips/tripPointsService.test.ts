@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { supabase } from '../../lib/supabase';
 import { TripPoint } from '../../types';
-import { addHomologationTestPoints, listTripPoints, tripPointSchema } from './tripPointsService';
+import { addHomologationTestPoints, addTripPoint, listTripPoints, tripPointSchema } from './tripPointsService';
 
 vi.mock('../../lib/supabase', () => ({ supabase: { from: vi.fn() } }));
 
@@ -36,12 +36,13 @@ describe('listTripPoints', () => {
           expect([field, options]).toEqual(['sequence_number', { ascending: true }]);
           return query;
         }),
-        limit: vi.fn(async (size) => ({
+        abortSignal: vi.fn().mockReturnThis(),
+        limit: vi.fn((size) => ({ abortSignal: () => Promise.resolve({
           data: rows.filter(p => p.sequence_number > cursor)
             .sort((a, b) => a.sequence_number - b.sequence_number)
             .slice(0, Math.min(size, serverLimit)),
           error: null,
-        })),
+        }) })),
       };
       return query as any;
     });
@@ -91,9 +92,39 @@ describe('listTripPoints', () => {
       .mockResolvedValueOnce({ data: [point(0)], error: null })
       .mockResolvedValueOnce({ data: null, error });
     const query = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(),
-      gt: vi.fn().mockReturnThis(), order: vi.fn().mockReturnThis(), limit };
+      gt: vi.fn().mockReturnThis(), order: vi.fn().mockReturnThis(), limit: (...args: any[]) => ({ abortSignal: () => limit(...args) }) };
     vi.mocked(supabase.from).mockReturnValue(query as any);
-    await expect(listTripPoints('trip-1')).rejects.toBe(error);
+    await expect(listTripPoints('trip-1')).rejects.toMatchObject({ info: { kind: 'UNKNOWN' } });
+  });
+
+  it('retries a transient page read at the same cursor without duplicating previous points', async () => {
+    vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const cursors: number[] = [];
+    const responses = [
+      { data: [point(0)], error: null },
+      { data: null, error: { status: 503 } },
+      { data: [point(1)], error: null },
+      { data: [], error: null },
+    ];
+    const query = { select: () => query, eq: () => query, gt: (_: string, cursor: number) => { cursors.push(cursor); return query; },
+      order: () => query, limit: () => query, abortSignal: async () => responses.shift()! };
+    vi.mocked(supabase.from).mockReturnValue(query as any);
+    expect((await listTripPoints('trip-1')).map(p => p.id)).toEqual(['point-0', 'point-1']);
+    expect(cursors).toEqual([-1, 0, 0, 1]);
+    vi.restoreAllMocks();
+  });
+  it('does not treat a missing response body as a valid empty GPS route', async () => {
+    const query = { select: () => query, eq: () => query, gt: () => query, order: () => query, limit: () => query,
+      abortSignal: async () => ({ data: null, error: null }) };
+    vi.mocked(supabase.from).mockReturnValue(query as any);
+    await expect(listTripPoints('trip-1')).rejects.toMatchObject({ info: { kind: 'UNKNOWN' } });
+  });
+  it('point writes are not automatically retried on a transient backend error', async () => {
+    const single = vi.fn().mockResolvedValue({ data: null, error: { status: 503 } });
+    const query = { insert: vi.fn().mockReturnThis(), select: vi.fn().mockReturnThis(), single };
+    vi.mocked(supabase.from).mockReturnValue(query as any);
+    await expect(addTripPoint(point(0))).rejects.toEqual({ status: 503 });
+    expect(query.insert).toHaveBeenCalledTimes(1); expect(single).toHaveBeenCalledTimes(1);
   });
 });
 

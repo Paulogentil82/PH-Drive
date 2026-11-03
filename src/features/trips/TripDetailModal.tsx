@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { X, Navigation, Calendar, Clock, Gauge, MapPin, FileText, CheckCircle, Ban, AlertCircle } from 'lucide-react';
 import { Trip, TripPoint } from '../../types';
-import { listTripPoints, calculateTripComparison, calculateGpsDistance } from './tripPointsService';
 import { getEffectiveEndOdometer, getEffectiveTripDistance } from './tripUtils';
-import { TripMap } from '../../components/common/TripMap';
+import { TripPointsContent } from '../../components/common/TripPointsContent';
+import { useTripPoints } from './useTripPoints';
+import { useAuth } from '../auth/AuthContext';
 
 interface TripDetailModalProps {
   isOpen: boolean;
@@ -13,28 +14,9 @@ interface TripDetailModalProps {
 }
 
 export function TripDetailModal({ isOpen, trip, onClose }: TripDetailModalProps) {
-  const [points, setPoints] = useState<TripPoint[]>([]);
-  const [loadingPoints, setLoadingPoints] = useState(false);
-
-  useEffect(() => {
-    if (isOpen && trip) {
-      fetchPoints(trip.id);
-    } else {
-      setPoints([]);
-    }
-  }, [isOpen, trip]);
-
-  const fetchPoints = async (tripId: string) => {
-    try {
-      setLoadingPoints(true);
-      const data = await listTripPoints(tripId);
-      setPoints(data);
-    } catch (err) {
-      console.error('Error loading trip points:', err);
-    } finally {
-      setLoadingPoints(false);
-    }
-  };
+  const { user, signOut } = useAuth();
+  const pointState = useTripPoints(isOpen && trip ? trip.id : null, user?.id);
+  const points = pointState.points;
 
   if (!isOpen || !trip) return null;
 
@@ -107,16 +89,10 @@ export function TripDetailModal({ isOpen, trip, onClose }: TripDetailModalProps)
                 <span>Reconstrução do Trajeto (MapLibre & GPS)</span>
               </h3>
               <span className="text-slate-500 text-[11px]">
-                {points.length} {points.length === 1 ? 'ponto registrado' : 'pontos registrados'}
+                {pointState.status === 'SUCCESS_WITH_POINTS' || pointState.status === 'SUCCESS_EMPTY' ? `${points.length} ${points.length === 1 ? 'ponto registrado' : 'pontos registrados'}` : '—'}
               </span>
             </div>
-            {loadingPoints ? (
-              <div className="h-[300px] bg-slate-950 border border-slate-800 rounded-2xl flex items-center justify-center text-slate-500">
-                Carregando pontos de GPS...
-              </div>
-            ) : (
-              <TripMap points={points} height="300px" />
-            )}
+            <TripPointsContent state={pointState} onRetry={pointState.retry} onSignIn={() => void signOut()} height="300px" />
             {lowAccuracyCount > 0 && (
               <div className="mt-2 p-2 bg-amber-950/30 border border-amber-800/40 rounded-xl text-amber-300 text-[11px] flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />

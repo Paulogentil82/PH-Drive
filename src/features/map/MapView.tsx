@@ -1,45 +1,50 @@
 import { effectiveTripDistance } from '../../utils/tripMetrics';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Map, Navigation, Car, Calendar, Filter, Eye, ShieldAlert } from 'lucide-react';
-import { Vehicle, Trip, TripPoint } from '../../types';
+import { Vehicle, Trip } from '../../types';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../auth/AuthContext';
-import { listTripPoints } from '../trips/tripPointsService';
-import { TripMap } from '../../components/common/TripMap';
+import { TripPointsContent } from '../../components/common/TripPointsContent';
+import { useTripPoints } from '../trips/useTripPoints';
+import { backendErrorMessage, classifyBackendError, runBackendRead } from '../../lib/backendDiagnostics';
 import { PageHeader, LoadingState, ErrorState, EmptyState } from '../../components/common/CommonComponents';
 
 export function MapView() {
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [trips, setTrips] = useState<Trip[]>([]);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string>('ALL');
   const [selectedTripId, setSelectedTripId] = useState<string>('');
-  const [currentTripPoints, setCurrentTripPoints] = useState<TripPoint[]>([]);
+  const pointState = useTripPoints(selectedTripId || null, user?.id);
+  const currentTripPoints = pointState.points;
+  const dataRequest = useRef(0);
   const [loading, setLoading] = useState(true);
-  const [loadingPoints, setLoadingPoints] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [authError, setAuthError] = useState(false);
 
   useEffect(() => {
     if (!user) return;
-    fetchData();
-  }, [user]);
+    setSelectedTripId('');
+    setSelectedVehicleId('ALL');
+    void fetchData();
+    return () => { dataRequest.current++; };
+  }, [user?.id]);
 
   const fetchData = async () => {
     if (!user) return;
+    const request = ++dataRequest.current;
     try {
       setLoading(true);
       setError(null);
+      setAuthError(false);
 
-      const [vRes, tRes] = await Promise.all([
-        supabase.from('vehicles').select('*').eq('user_id', user.id),
-        supabase.from('trips').select('*, vehicle:vehicles(*)').eq('user_id', user.id).order('started_at', { ascending: false })
+      const [vehicleData, tripData] = await Promise.all([
+        runBackendRead<Vehicle[] | null>('map_vehicles', signal => supabase.from('vehicles').select('*').eq('user_id', user.id).abortSignal(signal)),
+        runBackendRead<Trip[] | null>('map_trips', signal => supabase.from('trips').select('*, vehicle:vehicles(*)').eq('user_id', user.id).order('started_at', { ascending: false }).abortSignal(signal))
       ]);
-
-      if (vRes.error) throw vRes.error;
-      if (tRes.error) throw tRes.error;
-
-      setVehicles(vRes.data || []);
-      const allTrips = tRes.data || [];
+      if (request !== dataRequest.current) return;
+      setVehicles(vehicleData || []);
+      const allTrips = tripData || [];
       setTrips(allTrips);
 
       // Selecionar por padrão a primeira viagem se houver
@@ -50,31 +55,12 @@ export function MapView() {
         }
       }
     } catch (err: any) {
-      console.error('Error fetching map data:', err);
-      setError(err.message || 'Erro ao carregar dados do mapa.');
+      if (request !== dataRequest.current) return;
+      const info = classifyBackendError(err);
+      setAuthError(info.kind === 'AUTH');
+      setError(backendErrorMessage(info.kind));
     } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (selectedTripId) {
-      loadTripPointsForTrip(selectedTripId);
-    } else {
-      setCurrentTripPoints([]);
-    }
-  }, [selectedTripId]);
-
-  const loadTripPointsForTrip = async (tripId: string) => {
-    try {
-      setLoadingPoints(true);
-      const points = await listTripPoints(tripId);
-      setCurrentTripPoints(points);
-    } catch (err) {
-      console.error('Error loading trip points for map:', err);
-      setCurrentTripPoints([]);
-    } finally {
-      setLoadingPoints(false);
+      if (request === dataRequest.current) setLoading(false);
     }
   };
 
@@ -83,7 +69,7 @@ export function MapView() {
   }
 
   if (error) {
-    return <ErrorState message={error} onRetry={fetchData} />;
+    return <><ErrorState message={error} onRetry={fetchData} />{authError && <button type="button" onClick={() => void signOut()} className="text-blue-400">Entrar novamente</button>}</>;
   }
 
   // Filtrar viagens pelo veículo selecionado
@@ -163,7 +149,7 @@ export function MapView() {
           </div>
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
             <span className="text-xs text-slate-500 block mb-1">Pontos GPS</span>
-            <span className="text-sm font-bold text-blue-400">{currentTripPoints.length} pontos</span>
+            <span className="text-sm font-bold text-blue-400">{pointState.status === 'SUCCESS_WITH_POINTS' || pointState.status === 'SUCCESS_EMPTY' ? `${currentTripPoints.length} pontos` : '—'}</span>
           </div>
         </div>
       )}
@@ -177,13 +163,7 @@ export function MapView() {
         />
       ) : (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl">
-          {loadingPoints ? (
-            <div className="h-[500px] bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-center text-slate-400">
-              Carregando pontos do trajeto...
-            </div>
-          ) : (
-            <TripMap points={currentTripPoints} height="520px" />
-          )}
+          <TripPointsContent state={pointState} onRetry={pointState.retry} onSignIn={() => void signOut()} height="520px" />
         </div>
       )}
     </div>

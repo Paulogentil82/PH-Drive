@@ -28,6 +28,7 @@ import { usePreferences } from './PreferencesContext';
 import { supabase, getStoredSupabaseConfig, saveSupabaseConfig } from '../../lib/supabase';
 import { PageHeader } from '../../components/common/CommonComponents';
 import { Vehicle } from '../../types';
+import { BackendHealthIndicator } from '../../components/common/BackendHealthIndicator';
 import { backupService, ImportReport } from './backupService';
 
 export function ProfileView() {
@@ -350,6 +351,7 @@ export function ProfileView() {
         title="Configurações & Perfil"
         subtitle="Gerencie suas informações pessoais, preferências, dados, exportações e backups do sistema"
       />
+      <BackendHealthIndicator />
 
       {/* Tabs Selector */}
       <div className="flex border-b border-slate-800 gap-1 overflow-x-auto pb-px">
