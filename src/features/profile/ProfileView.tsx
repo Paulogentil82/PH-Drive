@@ -73,6 +73,9 @@ export function ProfileView() {
   const [countsLoading, setCountsLoading] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
   const [exportSuccess, setExportSuccess] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [exportRecordCount, setExportRecordCount] = useState<number | null>(null);
+  const [countsError, setCountsError] = useState<string | null>(null);
 
   // CSV exports state
   const [csvLoading, setCsvLoading] = useState<string | null>(null);
@@ -126,10 +129,11 @@ export function ProfileView() {
     if (!user) return;
     try {
       setCountsLoading(true);
+      setCountsError(null);
       const counts = await backupService.getBackupSummary(user.id);
       setSupabaseCounts(counts);
     } catch (err) {
-      console.error('Failed to load database counts:', err);
+      setCountsError(err instanceof Error ? err.message : 'Contagens indisponíveis. Tente novamente.');
     } finally {
       setCountsLoading(false);
     }
@@ -207,6 +211,9 @@ export function ProfileView() {
     if (!user) return;
     try {
       setExportLoading(true);
+      setExportSuccess(false);
+      setExportError(null);
+      setExportRecordCount(null);
       const data = await backupService.exportBackupJSON(user.id);
       
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8;' });
@@ -214,14 +221,19 @@ export function ProfileView() {
       const link = document.createElement('a');
       link.href = url;
       link.setAttribute('download', `ph-drive-backup-${new Date().toISOString().split('T')[0]}.json`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      try {
+        document.body.appendChild(link);
+        link.click();
+      } finally {
+        link.remove();
+        URL.revokeObjectURL(url);
+      }
       
+      setExportRecordCount(Object.values(data.metadata?.counts || {}).reduce((sum: number, count: number) => sum + count, 0));
       setExportSuccess(true);
       setTimeout(() => setExportSuccess(false), 3000);
     } catch (err) {
-      console.error('Failed to export backup:', err);
+      setExportError(err instanceof Error ? err.message : 'Não foi possível preparar o backup. Tente novamente.');
     } finally {
       setExportLoading(false);
     }
@@ -727,38 +739,39 @@ export function ProfileView() {
                 </button>
               </div>
 
+              {countsError && <p role="alert" className="mb-4 text-xs text-red-400">{countsError}</p>}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 <div className="bg-slate-950/40 p-4 border border-slate-850/60 rounded-2xl text-center">
                   <span className="text-[10px] text-slate-400 uppercase font-extrabold tracking-wider block">Veículos</span>
-                  <span className="text-2xl font-black text-white mt-1 block font-mono">{supabaseCounts.vehicles}</span>
+                  <span className="text-2xl font-black text-white mt-1 block font-mono">{countsError || countsLoading ? '—' : supabaseCounts.vehicles}</span>
                 </div>
                 <div className="bg-slate-950/40 p-4 border border-slate-850/60 rounded-2xl text-center">
                   <span className="text-[10px] text-slate-400 uppercase font-extrabold tracking-wider block">Viagens</span>
-                  <span className="text-2xl font-black text-white mt-1 block font-mono">{supabaseCounts.trips}</span>
+                  <span className="text-2xl font-black text-white mt-1 block font-mono">{countsError || countsLoading ? '—' : supabaseCounts.trips}</span>
                 </div>
                 <div className="bg-slate-950/40 p-4 border border-slate-850/60 rounded-2xl text-center">
                   <span className="text-[10px] text-slate-400 uppercase font-extrabold tracking-wider block">Pontos GPS</span>
-                  <span className="text-2xl font-black text-white mt-1 block font-mono">{supabaseCounts.tripPoints}</span>
+                  <span className="text-2xl font-black text-white mt-1 block font-mono">{countsError || countsLoading ? '—' : supabaseCounts.tripPoints}</span>
                 </div>
                 <div className="bg-slate-950/40 p-4 border border-slate-850/60 rounded-2xl text-center">
                   <span className="text-[10px] text-slate-400 uppercase font-extrabold tracking-wider block">Abast.</span>
-                  <span className="text-2xl font-black text-white mt-1 block font-mono">{supabaseCounts.fuelEntries}</span>
+                  <span className="text-2xl font-black text-white mt-1 block font-mono">{countsError || countsLoading ? '—' : supabaseCounts.fuelEntries}</span>
                 </div>
                 <div className="bg-slate-950/40 p-4 border border-slate-850/60 rounded-2xl text-center">
                   <span className="text-[10px] text-slate-400 uppercase font-extrabold tracking-wider block">Manut.</span>
-                  <span className="text-2xl font-black text-white mt-1 block font-mono">{supabaseCounts.maintenanceEntries}</span>
+                  <span className="text-2xl font-black text-white mt-1 block font-mono">{countsError || countsLoading ? '—' : supabaseCounts.maintenanceEntries}</span>
                 </div>
                 <div className="bg-slate-950/40 p-4 border border-slate-850/60 rounded-2xl text-center">
                   <span className="text-[10px] text-slate-400 uppercase font-extrabold tracking-wider block">Despesas</span>
-                  <span className="text-2xl font-black text-white mt-1 block font-mono">{supabaseCounts.vehicleExpenses}</span>
+                  <span className="text-2xl font-black text-white mt-1 block font-mono">{countsError || countsLoading ? '—' : supabaseCounts.vehicleExpenses}</span>
                 </div>
                 <div className="bg-slate-950/40 p-4 border border-slate-850/60 rounded-2xl text-center">
                   <span className="text-[10px] text-slate-400 uppercase font-extrabold tracking-wider block">Documentos</span>
-                  <span className="text-2xl font-black text-white mt-1 block font-mono">{supabaseCounts.vehicleDocuments}</span>
+                  <span className="text-2xl font-black text-white mt-1 block font-mono">{countsError || countsLoading ? '—' : supabaseCounts.vehicleDocuments}</span>
                 </div>
                 <div className="bg-slate-950/40 p-4 border border-slate-850/60 rounded-2xl text-center">
                   <span className="text-[10px] text-slate-400 uppercase font-extrabold tracking-wider block">Pneus</span>
-                  <span className="text-2xl font-black text-white mt-1 block font-mono">{supabaseCounts.vehicleTires}</span>
+                  <span className="text-2xl font-black text-white mt-1 block font-mono">{countsError || countsLoading ? '—' : supabaseCounts.vehicleTires}</span>
                 </div>
               </div>
             </div>
@@ -950,9 +963,11 @@ export function ProfileView() {
               {exportSuccess && (
                 <div className="mb-4 p-3 bg-emerald-950/50 border border-emerald-800/50 text-emerald-300 text-xs rounded-xl flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>Backup gerado e baixado!</span>
+                  <span>Backup concluído — {exportRecordCount} registros exportados. Download solicitado.</span>
                 </div>
               )}
+
+              {exportError && <p role="alert" className="mb-4 text-xs text-red-400">{exportError}</p>}
 
               <button
                 onClick={handleExportBackup}
@@ -962,7 +977,7 @@ export function ProfileView() {
                 {exportLoading ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Processando dados...</span>
+                    <span>Preparando backup...</span>
                   </>
                 ) : (
                   <>
@@ -971,7 +986,7 @@ export function ProfileView() {
                   </>
                 )}
               </button>
-              <p className="text-[9px] text-slate-500 text-center mt-3">Arquivo no padrão UTF-8 contendo vehicles, trips, fuel_entries, tire_entries, documents e despesas operacionais.</p>
+              <p className="text-[9px] text-slate-500 text-center mt-3">Inclui preferências, veículos, viagens, pontos GPS, abastecimentos, manutenções, despesas, documentos e pneus.</p>
             </div>
 
             {/* Individual CSV Export Block */}

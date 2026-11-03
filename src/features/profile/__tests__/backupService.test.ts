@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { backupService, BackupPayload } from '../backupService';
 import { supabase } from '../../../lib/supabase';
+import { webcrypto } from 'node:crypto';
 
 vi.mock('../../../lib/supabase', () => {
   const mockSingle = vi.fn();
@@ -30,7 +31,8 @@ vi.mock('../../../lib/supabase', () => {
 
   return {
     supabase: {
-      from: vi.fn(() => mockQueryBuilder)
+      from: vi.fn(() => mockQueryBuilder),
+      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-123' } }, error: null }) },
     }
   };
 });
@@ -38,14 +40,15 @@ vi.mock('../../../lib/supabase', () => {
 describe('Backup and Restore Service - 4A.10', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubGlobal('crypto', webcrypto);
   });
 
   describe('Exportações', () => {
     it('exporta JSON válido com schemaVersion = 1 e sem credentials', async () => {
       const mockDbData = {
-        profiles: [{ user_id: 'user-123', default_vehicle_id: 'v-1' }],
-        vehicles: [{ id: 'v-1', name: 'Titan 125', token: 'secret-token', api_key: 'abc' }],
-        trips: [{ id: 't-1', vehicle_id: 'v-1' }],
+        profiles: [{ id: 'profile-1', user_id: 'user-123', default_vehicle_id: 'v-1' }],
+        vehicles: [{ id: 'v-1', user_id: 'user-123', name: 'Titan 125', token: 'secret-token', api_key: 'abc' }],
+        trips: [{ id: 't-1', user_id: 'user-123', vehicle_id: 'v-1' }],
         trip_points: []
       } as any;
 
@@ -55,7 +58,7 @@ describe('Backup and Restore Service - 4A.10', () => {
           select: vi.fn().mockReturnThis(),
           eq: vi.fn().mockReturnThis(),
           order: vi.fn().mockReturnThis(),
-          range: vi.fn().mockResolvedValue({ data, error: null }),
+          range: vi.fn().mockImplementation((from, to) => Promise.resolve({ data: data.slice(from, to + 1), error: null })),
           single: vi.fn().mockResolvedValue({ data: data?.[0] || null, error: null }),
           then: (cb: any) => cb({ data, error: null })
         } as any;
@@ -306,6 +309,7 @@ describe('Backup and Restore Service - 4A.10', () => {
     it('carrega corretamente e sem truncamento com 999 pontos, 1000 pontos, 1001 pontos e 1083 pontos', async () => {
       const mockPoints = Array.from({ length: 1083 }, (_, i) => ({
         id: `point-${i}`,
+        user_id: 'user-123',
         trip_id: 'trip-1',
         latitude: -23.5,
         longitude: -46.6,
@@ -344,12 +348,13 @@ describe('Backup and Restore Service - 4A.10', () => {
       expect(results.length).toBe(1083);
       expect(results[0].id).toBe('point-0');
       expect(results[1082].id).toBe('point-1082');
-      expect(mockRange).toHaveBeenCalledTimes(2);
+      expect(mockRange).toHaveBeenCalledTimes(4);
     });
 
     it('preserva ordem e não duplica dados entre páginas', async () => {
       const mockPoints = Array.from({ length: 1005 }, (_, i) => ({
         id: `point-${i}`,
+        user_id: 'user-123',
         trip_id: 'trip-1',
         latitude: -23.5,
         longitude: -46.6,

@@ -1,11 +1,14 @@
 import { effectiveTripDistance } from '../../utils/tripMetrics';
 import { supabase } from '../../lib/supabase';
 import { DEFAULT_PREFERENCES, UserPreferences } from './preferencesService';
+import { BACKUP_TABLES, readBackupTable, type BackupTable } from './backupPagination';
+import { backupChecksum, backupCounts, sanitizeBackup, validateBackupIntegrity, type BackupMetadata } from './backupIntegrity';
 
 export interface BackupPayload {
   app: 'ph-drive';
   schemaVersion: 1;
   exportedAt: string;
+  metadata?: BackupMetadata;
   user: {
     preferences: Partial<UserPreferences>;
   };
@@ -47,83 +50,43 @@ const isValidUUID = (id: string): boolean => {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 };
 
-export const backupService = {
-  /**
-   * Helper to fetch a full table with pagination to bypass Supabase's default limit of 1000 records
-   */
-  async fetchFullTable(tableName: string, userId: string, orderByFields?: { field: string; ascending?: boolean }[]): Promise<any[]> {
-    let allData: any[] = [];
-    let from = 0;
-    const pageSize = 1000;
-    let hasMore = true;
+async function requireBackupUser(userId: string): Promise<void> {
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !userId || !data.user || data.user.id !== userId) {
+    throw new Error('Sessão inválida ou usuário divergente. Entre novamente para preparar o backup.');
+  }
+}
 
-    while (hasMore) {
-      let query = supabase
-        .from(tableName)
-        .select('*')
-        .eq('user_id', userId);
-
-      if (orderByFields && orderByFields.length > 0) {
-        for (const order of orderByFields) {
-          query = query.order(order.field, { ascending: order.ascending ?? true });
-        }
-      } else {
-        query = query.order('id', { ascending: true });
-      }
-
-      const { data, error } = await query.range(from, from + pageSize - 1);
-
-      if (error) {
-        console.error(`Error fetching paginated ${tableName}:`, error.message);
-        break;
-      }
-
-      if (data && data.length > 0) {
-        allData = [...allData, ...data];
-        if (data.length < pageSize) {
-          hasMore = false;
-        } else {
-          from += pageSize;
-        }
-      } else {
-        hasMore = false;
-      }
+/** Fail closed if related records changed between reads; never silently drop an orphan. */
+function assertExportRelationships(payload: BackupPayload): void {
+  const vehicles = new Set(payload.vehicles.map(row => row.id));
+  const trips = new Set(payload.trips.map(row => row.id));
+  for (const records of [payload.trips, payload.fuelEntries, payload.maintenanceEntries,
+    payload.vehicleExpenses, payload.vehicleDocuments, payload.vehicleTires]) {
+    if (records.some(row => !vehicles.has(row.vehicle_id))) {
+      throw new Error('Referência de veículo ausente; os dados podem ter mudado durante o backup. Tente novamente.');
     }
+  }
+  if (payload.tripPoints.some(row => !trips.has(row.trip_id))) {
+    throw new Error('Referência de viagem ausente nos pontos GPS; tente novamente o backup.');
+  }
+}
 
-    return allData;
+export const backupService = {
+  /** Canonical order is enforced; optional ordering argument retained for old callers. */
+  async fetchFullTable(tableName: string, userId: string, _orderByFields?: { field: string; ascending?: boolean }[]): Promise<any[]> {
+    return readBackupTable(tableName, userId);
   },
 
-  /**
-   * Safe exporter of all user tables
-   */
   async exportBackupJSON(userId: string): Promise<BackupPayload> {
-    const [
-      profilesRes,
-      vehiclesRes,
-      tripsRes,
-      fuelEntriesRes,
-      maintenanceEntriesRes,
-      expensesRes,
-      documentsRes,
-      tiresRes
-    ] = await Promise.all([
-      supabase.from('profiles').select('*').eq('user_id', userId),
-      supabase.from('vehicles').select('*').eq('user_id', userId),
-      supabase.from('trips').select('*').eq('user_id', userId),
-      supabase.from('fuel_entries').select('*').eq('user_id', userId),
-      supabase.from('maintenance_entries').select('*').eq('user_id', userId),
-      supabase.from('vehicle_expenses').select('*').eq('user_id', userId),
-      supabase.from('vehicle_documents').select('*').eq('user_id', userId),
-      supabase.from('vehicle_tires').select('*').eq('user_id', userId)
-    ]);
+    const startedAt = new Date().toISOString();
+    await requireBackupUser(userId);
+    // One table/page at a time bounds request concurrency and allows immediate failure.
+    const rows = {} as Record<BackupTable, any[]>;
+    for (const table of BACKUP_TABLES) rows[table] = await this.fetchFullTable(table, userId);
+    if (rows.profiles.length > 1) throw new Error('Mais de um perfil encontrado para o usuário; backup interrompido.');
+    const profileData = rows.profiles[0] || {};
 
-    const fullTripPoints = await this.fetchFullTable('trip_points', userId, [
-      { field: 'trip_id', ascending: true },
-      { field: 'sequence_number', ascending: true }
-    ]);
-
-    const profileData = profilesRes.data?.[0] || {};
-    
     // Filter and sanitize preferences
     const preferences: Partial<UserPreferences> = {
       default_vehicle_id: profileData.default_vehicle_id || null,
@@ -136,33 +99,35 @@ export const backupService = {
       theme_preference: profileData.theme_preference || DEFAULT_PREFERENCES.theme_preference
     };
 
-    // Helper to sanitize arrays (remove credentials, tokens, or foreign user_ids just in case)
-    const sanitize = (list: any[]) => {
-      return (list || []).map(({ token, access_token, refresh_token, password, secret, api_key, ...rest }) => rest);
+    const payload: BackupPayload = {
+      app: 'ph-drive', schemaVersion: 1, exportedAt: '', user: { preferences },
+      vehicles: sanitizeBackup(rows.vehicles), trips: sanitizeBackup(rows.trips),
+      tripPoints: sanitizeBackup(rows.trip_points), fuelEntries: sanitizeBackup(rows.fuel_entries),
+      maintenanceEntries: sanitizeBackup(rows.maintenance_entries),
+      vehicleExpenses: sanitizeBackup(rows.vehicle_expenses),
+      vehicleDocuments: sanitizeBackup(rows.vehicle_documents), vehicleTires: sanitizeBackup(rows.vehicle_tires),
     };
-
-    return {
-      app: 'ph-drive',
-      schemaVersion: 1,
-      exportedAt: new Date().toISOString(),
-      user: {
-        preferences
-      },
-      vehicles: sanitize(vehiclesRes.data || []),
-      trips: sanitize(tripsRes.data || []),
-      tripPoints: sanitize(fullTripPoints || []),
-      fuelEntries: sanitize(fuelEntriesRes.data || []),
-      maintenanceEntries: sanitize(maintenanceEntriesRes.data || []),
-      vehicleExpenses: sanitize(expensesRes.data || []),
-      vehicleDocuments: sanitize(documentsRes.data || []),
-      vehicleTires: sanitize(tiresRes.data || [])
+    await requireBackupUser(userId);
+    assertExportRelationships(payload);
+    const counts = backupCounts(payload, rows.profiles.length);
+    const completedAt = new Date().toISOString();
+    payload.exportedAt = completedAt;
+    payload.metadata = {
+      format_version: 1, app: 'ph-drive', user_id: userId,
+      backup_started_at: startedAt, backup_completed_at: completedAt, exported_at: completedAt,
+      consistency: 'non_transactional', counts,
     };
+    payload.metadata.checksum = {
+      algorithm: 'SHA-256', scope: 'payload-without-checksum', value: await backupChecksum(payload),
+    };
+    return payload;
   },
 
   /**
    * Count of current data in Supabase for user
    */
   async getBackupSummary(userId: string) {
+    await requireBackupUser(userId);
     const counts = await Promise.all([
       supabase.from('vehicles').select('id', { count: 'exact', head: true }).eq('user_id', userId),
       supabase.from('trips').select('id', { count: 'exact', head: true }).eq('user_id', userId),
@@ -173,6 +138,10 @@ export const backupService = {
       supabase.from('vehicle_documents').select('id', { count: 'exact', head: true }).eq('user_id', userId),
       supabase.from('vehicle_tires').select('id', { count: 'exact', head: true }).eq('user_id', userId)
     ]);
+
+    if (counts.some(result => result.error || result.count === null || result.count === undefined)) {
+      throw new Error('Não foi possível confirmar as contagens do backup. Tente atualizar novamente.');
+    }
 
     return {
       vehicles: counts[0].count || 0,
@@ -200,6 +169,12 @@ export const backupService = {
 
     if (payload.schemaVersion !== 1) {
       return { valid: false, error: 'Backup incompatível: a versão de esquema deste arquivo não é suportada.' };
+    }
+
+    try {
+      await validateBackupIntegrity(payload);
+    } catch (failure) {
+      return { valid: false, error: failure instanceof Error ? failure.message : 'Integridade do backup inválida.' };
     }
 
     // Fetch existing data for overlap checking
@@ -482,6 +457,7 @@ export const backupService = {
    * Execute the actual safe restoration process
    */
   async executeImport(payload: BackupPayload, userId: string, previewReport: ImportReport): Promise<ImportReport> {
+    await validateBackupIntegrity(payload);
     const finalReport: ImportReport = JSON.parse(JSON.stringify(previewReport));
 
     // Clear stats that will be computed during execution
