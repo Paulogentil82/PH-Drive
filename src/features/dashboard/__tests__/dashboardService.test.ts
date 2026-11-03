@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { dashboardService } from '../dashboardService';
+import { calculateDashboardPeriodMetrics } from '../dashboardMetrics';
 import { translateFuelType } from '../DashboardView';
 import { alertsService } from '../../alerts/alertsService';
 import { supabase } from '../../../lib/supabase';
@@ -22,6 +23,7 @@ vi.mock('../../../lib/supabase', () => {
     order: mockOrder,
     limit: mockLimit,
     single: mockSingle,
+    range: vi.fn().mockResolvedValue({ data: [], error: null }),
   };
 
   mockSelect.mockReturnValue(mockQueryBuilder);
@@ -69,43 +71,13 @@ describe('Dashboard Consolidated Unit Tests', () => {
     vehicleName: string
   ) => {
     const today = new Date();
-    const currentYear = today.getFullYear();
-    const currentMonth = today.getMonth();
-
-    const isCurrentMonth = (dateStr: string | null | undefined): boolean => {
-      if (!dateStr) return false;
-      const parts = dateStr.split('T')[0].split('-');
-      if (parts.length >= 2) {
-        const year = parseInt(parts[0], 10);
-        const month = parseInt(parts[1], 10) - 1;
-        return year === currentYear && month === currentMonth;
-      }
-      return false;
-    };
-
+    // Exercise the same production metric function used by DashboardView.
+    const scoped = <T extends object>(rows: T[]) => rows.map(row => ({ vehicle_id: 'v-1', ...row }));
+    const { kmMonth, spentMonth, tripsMonthCount } = calculateDashboardPeriodMetrics({
+      trips: scoped(trips), fuelEntries: scoped(fuelEntries),
+      maintenanceEntries: scoped(maintenanceEntries), expenses: scoped(expenses),
+    }, 'v-1', today);
     const completedTrips = trips.filter(t => t.status === 'COMPLETED');
-    const tripsThisMonth = completedTrips.filter(t => isCurrentMonth(t.started_at));
-
-    // kmMonth: gps_distance_km priority, distance_km fallback
-    const kmMonth = tripsThisMonth.reduce((sum, t) => {
-      const dist = t.gps_distance_km && t.gps_distance_km > 0 ? t.gps_distance_km : (t.distance_km || 0);
-      return sum + Number(dist);
-    }, 0);
-
-    // Gastos no mês (fuel, maintenance, expenses; documents NOT included)
-    const fuelMonthSpent = fuelEntries
-      .filter(f => isCurrentMonth(f.filled_at))
-      .reduce((sum, f) => sum + Number(f.total_amount || 0), 0);
-
-    const maintMonthSpent = maintenanceEntries
-      .filter(m => isCurrentMonth(m.performed_at))
-      .reduce((sum, m) => sum + Number(m.cost_amount || 0), 0);
-
-    const expenseMonthSpent = expenses
-      .filter(e => isCurrentMonth(e.expense_date))
-      .reduce((sum, e) => sum + Number(e.amount || 0), 0);
-
-    const spentMonth = fuelMonthSpent + maintMonthSpent + expenseMonthSpent;
 
     // Última viagem
     const lastTrip = completedTrips[0] || null;
@@ -148,7 +120,7 @@ describe('Dashboard Consolidated Unit Tests', () => {
     }
 
     return {
-      tripsMonth: tripsThisMonth.length,
+      tripsMonth: tripsMonthCount,
       kmMonth,
       spentMonth,
       lastTrip,

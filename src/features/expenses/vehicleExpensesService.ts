@@ -1,16 +1,22 @@
 import { supabase } from '../../lib/supabase';
 import { VehicleExpense } from '../../types/vehicle_expense';
+import { periodBounds } from '../../utils/metricDates';
+import { readAllPages } from '../../lib/readAllPages';
 
 export const vehicleExpensesService = {
-  async getExpenses(vehicleId: string): Promise<VehicleExpense[]> {
-    const { data, error } = await supabase
+  async getExpenses(vehicleId: string, days?: number, now = new Date()): Promise<VehicleExpense[]> {
+    let query = supabase
       .from('vehicle_expenses')
       .select('*')
       .eq('vehicle_id', vehicleId)
-      .order('expense_date', { ascending: false });
+      .order('expense_date', { ascending: false })
+      .order('id', { ascending: false });
 
-    if (error) throw error;
-    return data || [];
+    if (days !== undefined) {
+      const { civilStart, civilEnd } = periodBounds(days, now);
+      query = query.gte('expense_date', civilStart).lt('expense_date', civilEnd);
+    }
+    return readAllPages<VehicleExpense>((from, to) => query.range(from, to));
   },
 
   async addExpense(expense: Omit<VehicleExpense, 'id' | 'user_id' | 'created_at' | 'updated_at'>): Promise<VehicleExpense> {

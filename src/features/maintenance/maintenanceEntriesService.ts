@@ -1,16 +1,22 @@
 import { supabase } from '../../lib/supabase';
 import { MaintenanceEntry } from '../../types/maintenance_entry';
+import { periodBounds } from '../../utils/metricDates';
+import { readAllPages } from '../../lib/readAllPages';
 
 export const maintenanceEntriesService = {
-  async getEntries(vehicleId: string): Promise<MaintenanceEntry[]> {
-    const { data, error } = await supabase
+  async getEntries(vehicleId: string, days?: number, now = new Date()): Promise<MaintenanceEntry[]> {
+    let query = supabase
       .from('maintenance_entries')
       .select('*')
       .eq('vehicle_id', vehicleId)
-      .order('performed_at', { ascending: false });
+      .order('performed_at', { ascending: false })
+      .order('id', { ascending: false });
 
-    if (error) throw error;
-    return data || [];
+    if (days !== undefined) {
+      const { civilStart, civilEnd } = periodBounds(days, now);
+      query = query.gte('performed_at', civilStart).lt('performed_at', civilEnd);
+    }
+    return readAllPages<MaintenanceEntry>((from, to) => query.range(from, to));
   },
 
   async addEntry(entry: Omit<MaintenanceEntry, 'id' | 'user_id' | 'created_at' | 'updated_at'>): Promise<MaintenanceEntry> {

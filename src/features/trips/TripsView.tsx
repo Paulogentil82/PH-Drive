@@ -1,3 +1,4 @@
+import { effectiveTripDistance } from '../../utils/tripMetrics';
 import React, { useState, useEffect } from 'react';
 import { 
   Navigation, 
@@ -316,7 +317,7 @@ export function TripsView() {
                         <div className="text-xs text-slate-400">↓ {trip.destination_label || 'Destino não informado'}</div>
                       </td>
                       <td className="p-4 font-semibold text-white">
-                        {trip.distance_km !== null ? `${trip.distance_km} km` : '—'}
+                        {`${effectiveTripDistance(trip)} km`}
                       </td>
                       <td className="p-4 text-slate-300">
                         {durationMins !== null ? `${durationMins} min` : '—'}

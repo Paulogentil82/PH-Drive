@@ -1,3 +1,4 @@
+import { effectiveTripDistance } from '../../utils/tripMetrics';
 import { supabase } from '../../lib/supabase';
 import { DEFAULT_PREFERENCES, UserPreferences } from './preferencesService';
 
@@ -873,7 +874,7 @@ export const backupService = {
         rows = (data || []).map(t => [
           t.started_at ? new Date(t.started_at).toLocaleString('pt-BR') : '',
           t.ended_at ? new Date(t.ended_at).toLocaleString('pt-BR') : '',
-          (t.gps_distance_km || t.distance_km || 0).toString(),
+          effectiveTripDistance(t).toString(),
           t.duration_seconds ? `${Math.round(t.duration_seconds / 60)} min` : '',
           (t.start_odometer_km || 0).toString(),
           (t.end_odometer_km || 0).toString(),

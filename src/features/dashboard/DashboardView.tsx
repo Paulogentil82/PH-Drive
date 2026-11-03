@@ -24,6 +24,8 @@ import { useAuth } from '../auth/AuthContext';
 import { usePreferences } from '../profile/PreferencesContext';
 import { StatCard, LoadingState, ErrorState, PageHeader } from '../../components/common/CommonComponents';
 import { dashboardService } from './dashboardService';
+import { calculateDashboardPeriodMetrics } from './dashboardMetrics';
+import { effectiveTripDistance } from '../../utils/tripMetrics';
 import { fuelEntriesService } from '../fuel/fuelEntriesService';
 import { alertsService } from '../alerts/alertsService';
 import { Alert } from '../../types/alerts';
@@ -59,6 +61,7 @@ export function DashboardView({ onNavigate, alerts: initialAlerts, criticalAlert
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string>('');
   const [dashboardData, setDashboardData] = useState<{
+    vehicleId: string;
     trips: Trip[];
     fuelEntries: any[];
     maintenanceEntries: MaintenanceEntry[];
@@ -110,7 +113,9 @@ export function DashboardView({ onNavigate, alerts: initialAlerts, criticalAlert
   }, [user]);
 
   // 2. Fetch specific vehicle consolidated data when selection changes
+  const dataRequest = React.useRef(0);
   const fetchSelectedVehicleData = async (vehicleId: string) => {
+    const request = ++dataRequest.current;
     try {
       setLoading(true);
       setError(null);
@@ -121,6 +126,7 @@ export function DashboardView({ onNavigate, alerts: initialAlerts, criticalAlert
         alertsService.getAlerts()
       ]);
 
+      if (request !== dataRequest.current) return;
       setDashboardData(data);
       
       // Filter alerts specifically for this vehicle and respect preferences
@@ -134,9 +140,9 @@ export function DashboardView({ onNavigate, alerts: initialAlerts, criticalAlert
       setVehicleAlerts(filteredAlerts);
     } catch (err: any) {
       console.error('Error fetching dashboard vehicle data:', err);
-      setError(err.message || 'Erro ao consolidar dados do painel.');
+      if (request === dataRequest.current) setError(err.message || 'Erro ao consolidar dados do painel.');
     } finally {
-      setLoading(false);
+      if (request === dataRequest.current) setLoading(false);
     }
   };
 
@@ -144,6 +150,7 @@ export function DashboardView({ onNavigate, alerts: initialAlerts, criticalAlert
     if (selectedVehicleId) {
       fetchSelectedVehicleData(selectedVehicleId);
     }
+    return () => { dataRequest.current++; };
   }, [selectedVehicleId]);
 
   // Selected vehicle helper
@@ -161,22 +168,9 @@ export function DashboardView({ onNavigate, alerts: initialAlerts, criticalAlert
     return new Date(dateStr).toLocaleDateString('pt-BR');
   };
 
-  // Helper: check if a date string is in the current month (civil date friendly)
-  const isCurrentMonthCivil = (dateStr: string | null | undefined): boolean => {
-    if (!dateStr) return false;
-    const parts = dateStr.split('T')[0].split('-');
-    if (parts.length >= 2) {
-      const year = parseInt(parts[0], 10);
-      const month = parseInt(parts[1], 10) - 1; // 0-indexed
-      const today = new Date();
-      return year === today.getFullYear() && month === today.getMonth();
-    }
-    return false;
-  };
-
   // Metrics calculations
   const metrics = useMemo(() => {
-    if (!dashboardData || !selectedVehicle) {
+    if (!dashboardData || !selectedVehicle || dashboardData.vehicleId !== selectedVehicle.id) {
       return {
         odometer: 0,
         tripsMonth: 0,
@@ -201,37 +195,9 @@ export function DashboardView({ onNavigate, alerts: initialAlerts, criticalAlert
 
     const { trips, fuelEntries, maintenanceEntries, expenses, documents, tires } = dashboardData;
 
-    // 1. Month-based calculations
     const completedTrips = trips.filter(t => t.status === 'COMPLETED');
-    const tripsThisMonth = completedTrips.filter(t => isCurrentMonthCivil(t.started_at));
-    const tripsMonthCount = tripsThisMonth.length;
-
-    // Km percorridos no mês: use gps_distance_km if available and > 0, else distance_km
-    const kmMonth = tripsThisMonth.reduce((sum, t) => {
-      const dist = t.gps_distance_km && t.gps_distance_km > 0 ? t.gps_distance_km : (t.distance_km || 0);
-      return sum + Number(dist);
-    }, 0);
-
-    // Gastos no mês: abastecimentos + manutenções + despesas gerais do mês corrente
-    const fuelMonthSpent = fuelEntries
-      .filter(f => isCurrentMonthCivil(f.filled_at))
-      .reduce((sum, f) => sum + Number(f.total_amount || 0), 0);
-
-    const maintMonthSpent = maintenanceEntries
-      .filter(m => isCurrentMonthCivil(m.performed_at))
-      .reduce((sum, m) => sum + Number(m.cost_amount || 0), 0);
-
-    const expenseMonthSpent = expenses
-      .filter(e => isCurrentMonthCivil(e.expense_date))
-      .reduce((sum, e) => sum + Number(e.amount || 0), 0);
-
-    const spentMonth = fuelMonthSpent + maintMonthSpent + expenseMonthSpent;
-
-    const spentByCategory = {
-      fuel: fuelMonthSpent,
-      maintenance: maintMonthSpent,
-      general: expenseMonthSpent
-    };
+    const { tripsMonthCount, kmMonth, spentMonth, spentByCategory, recentMonthsDistances } =
+      calculateDashboardPeriodMetrics(dashboardData, selectedVehicle.id);
 
     // 2. Alertas críticos (VENCIDO + URGENTE)
     const criticalAlertsCount = vehicleAlerts.filter(a => a.severity === 'VENCIDO' || a.severity === 'URGENTE').length;
@@ -377,34 +343,6 @@ export function DashboardView({ onNavigate, alerts: initialAlerts, criticalAlert
         severity
       };
     });
-
-    // 8. Distâncias dos últimos 6 meses (Gráfico Compacto)
-    const monthLabels = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
-    const today = new Date();
-    const recentMonthsDistances = [];
-
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
-      const mYear = d.getFullYear();
-      const mMonth = d.getMonth();
-      
-      // Filter trips in this month
-      const monthTrips = completedTrips.filter(t => {
-        if (!t.started_at) return false;
-        const td = new Date(t.started_at);
-        return td.getFullYear() === mYear && td.getMonth() === mMonth;
-      });
-
-      const distSum = monthTrips.reduce((sum, t) => {
-        const dist = t.gps_distance_km && t.gps_distance_km > 0 ? t.gps_distance_km : (t.distance_km || 0);
-        return sum + Number(dist);
-      }, 0);
-
-      recentMonthsDistances.push({
-        label: monthLabels[mMonth],
-        distance: distSum
-      });
-    }
 
     // 9. Resumo Textual factual e elegante
     let summaryText = '';
@@ -768,9 +706,7 @@ export function DashboardView({ onNavigate, alerts: initialAlerts, criticalAlert
                     <TrendingUp className="text-blue-400 w-4 h-4 shrink-0" />
                     <span className="text-slate-400">Distância:</span>
                     <span className="font-bold text-white font-mono">
-                      {formatDistance(metrics.lastTrip.gps_distance_km && metrics.lastTrip.gps_distance_km > 0 
-                        ? metrics.lastTrip.gps_distance_km 
-                        : (metrics.lastTrip.distance_km || 0))}
+                      {formatDistance(effectiveTripDistance(metrics.lastTrip))}
                     </span>
                   </div>
 
@@ -834,7 +770,7 @@ export function DashboardView({ onNavigate, alerts: initialAlerts, criticalAlert
               </div>
 
               <div className="border-t border-slate-800 pt-3 mt-4 flex items-center justify-between">
-                <span className="text-[11px] text-slate-500">Consumo Médio:</span>
+                <span className="text-[11px] text-slate-500">Consumo Médio (histórico):</span>
                 <span className={`text-xs font-bold font-mono ${metrics.avgConsumption ? 'text-emerald-400' : 'text-slate-400'}`}>
                   {metrics.avgConsumption ? `${metrics.avgConsumption.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} ${preferences.distance_unit === 'MI' ? 'mi/l' : 'km/l'}` : 'Dado insuficiente'}
                 </span>

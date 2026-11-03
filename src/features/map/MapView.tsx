@@ -1,3 +1,4 @@
+import { effectiveTripDistance } from '../../utils/tripMetrics';
 import React, { useState, useEffect } from 'react';
 import { Map, Navigation, Car, Calendar, Filter, Eye, ShieldAlert } from 'lucide-react';
 import { Vehicle, Trip, TripPoint } from '../../types';
@@ -137,7 +138,7 @@ export function MapView() {
             ) : (
               filteredTrips.map(t => (
                 <option key={t.id} value={t.id}>
-                  {new Date(t.started_at).toLocaleDateString('pt-BR')} - {t.origin_label || 'Início'} → {t.destination_label || 'Fim'} ({t.distance_km ?? 0} km)
+                  {new Date(t.started_at).toLocaleDateString('pt-BR')} - {t.origin_label || 'Início'} → {t.destination_label || 'Fim'} ({effectiveTripDistance(t)} km)
                 </option>
               ))
             )}

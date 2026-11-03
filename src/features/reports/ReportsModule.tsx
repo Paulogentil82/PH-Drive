@@ -1,83 +1,46 @@
 import React, { useState, useEffect } from 'react';
 import { Vehicle } from '../../types';
+import type { ReportData } from '../../types/reports';
+import { calculateReportMetrics } from './reportMetrics';
+import { metricDate } from '../../utils/metricDates';
 import { LoadingState, ErrorState } from '../../components/common/CommonComponents';
 import { reportsService } from './reportsService';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 
 export const ReportsModule = ({ vehicle }: { vehicle: Vehicle }) => {
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [period, setPeriod] = useState<string>('all');
 
+  const requestVersion = React.useRef(0);
+  const days = period === 'all' ? undefined : Number(period);
+
   const loadData = async () => {
+    const request = ++requestVersion.current;
     try {
       setLoading(true);
-      const days = period === 'all' ? undefined : parseInt(period);
+      setError(null);
       const res = await reportsService.getConsolidatedData(vehicle.id, days);
-      setData(res);
+      if (request === requestVersion.current) setData(res);
     } catch (err: any) {
-      setError(err.message);
+      if (request === requestVersion.current) setError(err.message);
     } finally {
-      setLoading(false);
+      if (request === requestVersion.current) setLoading(false);
     }
   };
 
-  useEffect(() => { loadData(); }, [vehicle.id, period]);
-
-  const monthlyData = React.useMemo(() => {
-      if (!data) return [];
-      const { fuel, maintenance, expenses } = data;
-      const monthsMap: Record<string, any> = {};
-
-      fuel.forEach((f: any) => {
-          const date = new Date(f.filled_at);
-          const m = date.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' });
-          if (!monthsMap[m]) monthsMap[m] = { month: m, timestamp: date.getTime(), Combustível: 0, Manutenção: 0, Despesas: 0 };
-          monthsMap[m].Combustível += f.total_amount || 0;
-      });
-      maintenance.forEach((m: any) => {
-          const date = new Date(m.performed_at);
-          const mon = date.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' });
-          if (!monthsMap[mon]) monthsMap[mon] = { month: mon, timestamp: date.getTime(), Combustível: 0, Manutenção: 0, Despesas: 0 };
-          monthsMap[mon].Manutenção += m.cost_amount || 0;
-      });
-      expenses.forEach((e: any) => {
-          const date = new Date(e.expense_date);
-          const mon = date.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' });
-          if (!monthsMap[mon]) monthsMap[mon] = { month: mon, timestamp: date.getTime(), Combustível: 0, Manutenção: 0, Despesas: 0 };
-          monthsMap[mon].Despesas += e.amount || 0;
-      });
-      
-      return Object.values(monthsMap).sort((a: any, b: any) => a.timestamp - b.timestamp);
-  }, [data]);
-
-  const monthlyDistance = React.useMemo(() => {
-      if (!data) return [];
-      const { trips } = data;
-      const distMap: Record<string, any> = {};
-      trips.forEach((t: any) => {
-          const date = new Date(t.end_time || t.start_time);
-          const mon = date.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' });
-          const km = (t.gps_distance_km && t.gps_distance_km > 0) ? t.gps_distance_km : (t.distance_km || 0);
-          if (!distMap[mon]) distMap[mon] = { month: mon, timestamp: date.getTime(), km: 0 };
-          distMap[mon].km += km;
-      });
-      return Object.values(distMap).sort((a: any, b: any) => a.timestamp - b.timestamp);
-  }, [data]);
+  useEffect(() => {
+    loadData();
+    return () => { requestVersion.current++; };
+  }, [vehicle.id, period]);
 
   if (loading) return <LoadingState message="Carregando..." />;
   if (error) return <ErrorState message={error} onRetry={loadData} />;
+  if (!data || data.vehicleId !== vehicle.id || data.days !== days) return <LoadingState message="Carregando..." />;
 
-  const { consolidated, fuel, maintenance, expenses, trips } = data;
-
-  const totalSpent = consolidated.reduce((sum: number, e: any) => sum + e.amount, 0);
-  const fuelSpent = fuel.reduce((sum: number, e: any) => sum + e.total_amount, 0);
-  const maintSpent = maintenance.reduce((sum: number, e: any) => sum + (e.cost_amount || 0), 0);
-  const genSpent = expenses.reduce((sum: number, e: any) => sum + e.amount, 0);
-  
-  const totalKm = trips.reduce((sum: number, t: any) => sum + ((t.gps_distance_km && t.gps_distance_km > 0) ? t.gps_distance_km : (t.distance_km || 0)), 0);
-  const costPerKm = totalKm > 0 ? totalSpent / totalKm : 0;
+  const { consolidated, trips } = data;
+  const { monthlyData, monthlyDistance, totalSpent, fuelSpent, maintSpent, genSpent, totalKm, costPerKm } = calculateReportMetrics(data);
 
   const chartData = [
       { name: 'Combustível', value: fuelSpent },
@@ -87,7 +50,7 @@ export const ReportsModule = ({ vehicle }: { vehicle: Vehicle }) => {
 
   const exportCSV = () => {
     const headers = ['Data', 'Tipo', 'Descrição', 'Valor'];
-    const rows = consolidated.map((e: any) => [new Date(e.date).toLocaleDateString(), e.type, e.description, e.amount.toFixed(2)]);
+    const rows = consolidated.map((e: any) => [metricDate(e.date, true)!.toLocaleDateString('pt-BR'), e.type, e.description, e.amount.toFixed(2)]);
     const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -112,7 +75,7 @@ export const ReportsModule = ({ vehicle }: { vehicle: Vehicle }) => {
           <button onClick={exportCSV} className="p-2 bg-slate-800 rounded border border-slate-700 text-white">Exportar CSV</button>
       </div>
 
-      {consolidated.length === 0 ? (
+      {consolidated.length === 0 && trips.length === 0 ? (
           <p className="text-slate-400">Não há dados suficientes no período selecionado.</p>
       ) : (
         <>
@@ -123,7 +86,7 @@ export const ReportsModule = ({ vehicle }: { vehicle: Vehicle }) => {
                 </div>
                 <div className="p-4 bg-slate-950 rounded-xl border border-slate-800">
                     <p className="text-slate-400 text-xs">Custo por Km</p>
-                    <p className="font-bold text-white text-lg">{totalKm > 0 ? `R$ ${costPerKm.toFixed(2)}` : '—'}</p>
+                    <p className="font-bold text-white text-lg">{costPerKm !== null ? `R$ ${costPerKm.toFixed(2)}` : '—'}</p>
                 </div>
                 <div className="p-4 bg-slate-950 rounded-xl border border-slate-800">
                     <p className="text-slate-400 text-xs">Viagens</p>
@@ -190,7 +153,7 @@ export const ReportsModule = ({ vehicle }: { vehicle: Vehicle }) => {
                 <tbody>
                 {consolidated.map((e: any) => (
                     <tr key={e.id} className="border-b border-slate-800">
-                    <td className="py-3">{new Date(e.date).toLocaleDateString()}</td>
+                    <td className="py-3">{metricDate(e.date, true)!.toLocaleDateString('pt-BR')}</td>
                     <td className="py-3">{e.type}</td>
                     <td className="py-3">{e.description}</td>
                     <td className="py-3">R$ {e.amount.toFixed(2)}</td>

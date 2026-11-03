@@ -1,29 +1,17 @@
 import { Trip } from '@/types';
 import { OdometerSource, DistanceSource } from '@/types/odometer';
-import { haversineDistance } from './tripPointsService';
+import { effectiveTripDistance } from '../../utils/tripMetrics';
 
-export const getEffectiveTripDistance = (trip: Trip): { distance: number | null; source: DistanceSource } => {
-  if (trip.gps_distance_km != null && trip.gps_distance_km > 0) {
-    return { distance: trip.gps_distance_km as number, source: 'GPS' };
+export const getEffectiveTripDistance = (trip: Trip): { distance: number; source: DistanceSource } => {
+  const distance = effectiveTripDistance(trip);
+  if (Number.isFinite(trip.gps_distance_km) && trip.gps_distance_km! > 0) {
+    return { distance, source: 'GPS' };
   }
-  if (trip.distance_km != null && trip.distance_km >= 0) {
-    return { distance: trip.distance_km, source: 'ODOMETER' };
-  }
-  
-  if (trip.trip_points && trip.trip_points.length >= 2) {
-    let haversineDist = 0;
-    for (let i = 0; i < trip.trip_points.length - 1; i++) {
-        haversineDist += haversineDistance(
-            trip.trip_points[i].latitude,
-            trip.trip_points[i].longitude,
-            trip.trip_points[i + 1].latitude,
-            trip.trip_points[i + 1].longitude
-        );
-    }
-    return { distance: haversineDist, source: 'HAVERSINE' };
+  if (Number.isFinite(trip.distance_km) && trip.distance_km! >= 0) {
+    return { distance, source: 'ODOMETER' };
   }
   
-  return { distance: null, source: 'UNAVAILABLE' };
+  return { distance, source: 'UNAVAILABLE' };
 };
 
 export const getEffectiveEndOdometer = (trip: Trip): { odometer: number | null; source: OdometerSource } => {
@@ -31,8 +19,8 @@ export const getEffectiveEndOdometer = (trip: Trip): { odometer: number | null; 
     return { odometer: trip.end_odometer_km, source: 'RECORDED' };
   }
   
-  const { distance } = getEffectiveTripDistance(trip);
-  if (trip.start_odometer_km !== null && distance !== null) {
+  const { distance, source } = getEffectiveTripDistance(trip);
+  if (trip.start_odometer_km !== null && source !== 'UNAVAILABLE') {
     return { odometer: trip.start_odometer_km + distance, source: 'GPS_CALCULATED' };
   }
   

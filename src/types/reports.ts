@@ -1,3 +1,18 @@
+import type { Trip } from './index';
+import type { FuelEntry } from './fuel_entry';
+import type { MaintenanceEntry } from './maintenance_entry';
+import type { VehicleExpense } from './vehicle_expense';
+
+export interface ReportData {
+  vehicleId: string;
+  days?: number;
+  consolidated: ConsolidatedItem[];
+  fuel: FuelEntry[];
+  maintenance: MaintenanceEntry[];
+  expenses: VehicleExpense[];
+  trips: Trip[];
+}
+
 export interface ConsolidatedItem {
   id: string;
   date: string;

@@ -1,5 +1,7 @@
 import { supabase } from '../../lib/supabase';
 import { FuelEntry } from '@/types/fuel_entry';
+import { periodBounds } from '../../utils/metricDates';
+import { readAllPages } from '../../lib/readAllPages';
 
 export const fuelEntriesService = {
   async addEntry(entry: Omit<FuelEntry, 'id' | 'user_id' | 'created_at' | 'updated_at'>): Promise<FuelEntry> {
@@ -50,22 +52,20 @@ export const fuelEntriesService = {
     if (error) throw error;
   },
 
-  async getEntries(vehicleId: string, days?: number): Promise<FuelEntry[]> {
+  async getEntries(vehicleId: string, days?: number, now = new Date()): Promise<FuelEntry[]> {
     let query = supabase
       .from('fuel_entries')
       .select('*')
       .eq('vehicle_id', vehicleId)
-      .order('filled_at', { ascending: false });
+      .order('filled_at', { ascending: false })
+      .order('id', { ascending: false });
 
-    if (days) {
-      const date = new Date();
-      date.setDate(date.getDate() - days);
-      query = query.gte('filled_at', date.toISOString());
+    if (days !== undefined) {
+      const { civilStart, civilEnd } = periodBounds(days, now);
+      query = query.gte('filled_at', civilStart).lt('filled_at', civilEnd);
     }
 
-    const { data, error } = await query;
-    if (error) throw error;
-    return (data as FuelEntry[]) || [];
+    return readAllPages<FuelEntry>((from, to) => query.range(from, to));
   },
 
   calculateConsumption(entries: FuelEntry[]): { lastConsumption: number | null, averageConsumption: number | null, totalSpent: number, totalLiters: number } {
